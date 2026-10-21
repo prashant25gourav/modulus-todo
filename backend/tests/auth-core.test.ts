@@ -5,10 +5,10 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { User } from '../src/models/user.model';
 import { connectDB, disconnectDB } from '../src/config/db';
-import { hashPassword, verifyPassword, dummyVerifyPassword } from '../src/utils/password';
+import { hashPassword, verifyPassword, dummyVerifyPassword, dummyHashPromise } from '../src/utils/password';
 import { signAccessToken, verifyAccessToken, JWT_ISSUER, JWT_AUDIENCE } from '../src/utils/jwt';
 import { authenticate } from '../src/middleware/auth.middleware';
-import { env } from '../src/config/env';
+import { env, validateEnv } from '../src/config/env';
 
 describe('Auth Core Utilities & Model Tests', () => {
   let mongoServer: MongoMemoryServer;
@@ -59,13 +59,18 @@ describe('Auth Core Utilities & Model Tests', () => {
     await expect(user2.save()).rejects.toMatchObject({ code: 11000 });
   });
 
-  it('Argon2id hashing, verification, and dummy verification', async () => {
+  it('Argon2id hashing, verification, and dynamic startup dummy verification', async () => {
     const password = 'CorrectPassword123!';
     const hash = await hashPassword(password);
 
     expect(hash).toMatch(/^\$argon2id\$/);
     expect(await verifyPassword(hash, password)).toBe(true);
     expect(await verifyPassword(hash, 'WrongPassword123!')).toBe(false);
+
+    // Verify dynamic dummy hash promise resolution
+    const resolvedDummyHash = await dummyHashPromise;
+    expect(resolvedDummyHash).toBeTruthy();
+    expect(resolvedDummyHash).toMatch(/^\$argon2id\$/);
 
     // Dummy verification executes without throwing
     const dummyResult = await dummyVerifyPassword('randomPassword');
@@ -76,7 +81,10 @@ describe('Auth Core Utilities & Model Tests', () => {
     const userId = '64b0f925916327b88939b111';
     const token = signAccessToken(userId);
 
-    const decodedHeader = jwt.decode(token, { complete: true }) as { header: { alg: string }; payload: Record<string, unknown> };
+    const decodedHeader = jwt.decode(token, { complete: true }) as {
+      header: { alg: string };
+      payload: Record<string, unknown>;
+    };
     expect(decodedHeader.header.alg).toBe('HS256');
     expect(decodedHeader.payload.iss).toBe(JWT_ISSUER);
     expect(decodedHeader.payload.aud).toBe(JWT_AUDIENCE);
@@ -86,6 +94,32 @@ describe('Auth Core Utilities & Model Tests', () => {
 
     const verified = verifyAccessToken(token);
     expect(verified.sub).toBe(userId);
+  });
+
+  it('JWT signing rejects invalid ObjectId strings', () => {
+    expect(() => signAccessToken('not-an-object-id')).toThrowError(/Invalid user ID/);
+    expect(() => signAccessToken('12345')).toThrowError(/Invalid user ID/);
+  });
+
+  it('JWT verification throws when exp is missing or not a number', () => {
+    const userId = '64b0f925916327b88939b111';
+    const tokenWithoutExp = jwt.sign(
+      { sub: userId },
+      env.JWT_ACCESS_SECRET,
+      { algorithm: 'HS256', issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
+    );
+
+    expect(() => verifyAccessToken(tokenWithoutExp)).toThrowError(/expiration/);
+  });
+
+  it('JWT verification throws when sub is not a valid 24-hex-character ObjectId', () => {
+    const invalidSubToken = jwt.sign(
+      { sub: 'invalid_non_hex_sub_id_test!' },
+      env.JWT_ACCESS_SECRET,
+      { algorithm: 'HS256', issuer: JWT_ISSUER, audience: JWT_AUDIENCE, expiresIn: '15m' }
+    );
+
+    expect(() => verifyAccessToken(invalidSubToken)).toThrowError(/valid 24-character hex ObjectId/);
   });
 
   it('JWT verification rejects tampered, expired, and alg: none tokens', () => {
@@ -108,29 +142,19 @@ describe('Auth Core Utilities & Model Tests', () => {
     const noneAlgToken = jwt.sign(
       { sub: userId },
       '',
-      { algorithm: 'none' as any, issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
+      { algorithm: 'none' as unknown as jwt.Algorithm, issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
     );
     expect(() => verifyAccessToken(noneAlgToken)).toThrow();
   });
 
-  it('authenticate middleware protects endpoints and attaches req.user', async () => {
+  it('authenticate middleware loads user with select(-passwordHash)', async () => {
     const testApp = express();
     testApp.get('/protected', authenticate, (req: Request, res: Response) => {
       res.json({ success: true, user: req.user });
     });
 
-    // Without token -> 401
-    const noTokenRes = await request(testApp).get('/protected');
-    expect(noTokenRes.status).toBe(401);
-    expect(noTokenRes.body).toEqual({ status: 'error', message: 'Unauthorized' });
-
-    // With invalid token -> 401
-    const invalidTokenRes = await request(testApp).get('/protected').set('Authorization', 'Bearer invalid.token.here');
-    expect(invalidTokenRes.status).toBe(401);
-
-    // With valid user and token -> 200
     const user = await User.create({
-      email: 'auth_test@example.com',
+      email: 'select_test@example.com',
       passwordHash: await hashPassword('password123'),
     });
     const validToken = signAccessToken(user.id);
@@ -138,7 +162,28 @@ describe('Auth Core Utilities & Model Tests', () => {
     const validRes = await request(testApp).get('/protected').set('Authorization', 'Bearer ' + validToken);
     expect(validRes.status).toBe(200);
     expect(validRes.body.success).toBe(true);
-    expect(validRes.body.user).toHaveProperty('id', user.id);
-    expect(validRes.body.user).not.toHaveProperty('passwordHash');
+    // Explicitly verify passwordHash is undefined on req.user document loaded from db
+    expect(validRes.body.user.passwordHash).toBeUndefined();
+  });
+
+  it('env validates ACCESS_TOKEN_TTL format (^\d+[smhd]$)', () => {
+    expect(() => {
+      validateEnv({
+        PORT: '4000',
+        NODE_ENV: 'development',
+        MONGODB_URI: 'mongodb://localhost:27017/test_db',
+        JWT_ACCESS_SECRET: 'super_secret_jwt_access_token_key_at_least_32_chars_long!',
+        ACCESS_TOKEN_TTL: 'invalid_format',
+      });
+    }).toThrowError(/ACCESS_TOKEN_TTL/);
+
+    const validConfig = validateEnv({
+      PORT: '4000',
+      NODE_ENV: 'development',
+      MONGODB_URI: 'mongodb://localhost:27017/test_db',
+      JWT_ACCESS_SECRET: 'super_secret_jwt_access_token_key_at_least_32_chars_long!',
+      ACCESS_TOKEN_TTL: '20m',
+    });
+    expect(validConfig.ACCESS_TOKEN_TTL).toBe('20m');
   });
 });

@@ -12,7 +12,10 @@ export const envSchema = z.object({
   JWT_ACCESS_SECRET: z
     .string()
     .min(32, 'JWT_ACCESS_SECRET must be at least 32 characters long'),
-  ACCESS_TOKEN_TTL: z.string().default('15m'),
+  ACCESS_TOKEN_TTL: z
+    .string()
+    .regex(/^\d+[smhd]$/, 'ACCESS_TOKEN_TTL must be a duration string matching format like 15m, 1h, 7d')
+    .default('15m'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

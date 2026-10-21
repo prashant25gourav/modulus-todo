@@ -1,4 +1,5 @@
 import * as argon2 from 'argon2';
+import { logger } from '../config/db';
 
 /**
  * OWASP recommended parameters for Argon2id.
@@ -10,13 +11,15 @@ export const ARGON2_OPTIONS: argon2.HashOptions = {
   parallelism: 1,    // 1 thread
 };
 
-// Constant dummy hash fallback
-let dummyHash = '$argon2id$v=19$m=19456,t=2,p=1$7v1bBqXy98/L4r5nJ9K8gA$R1e2W3q4E5r6T7y8U9i0O1p2A3s4D5f6G7h8J9k0L1z';
-
-// Pre-compute live hash on module load
-void argon2.hash('__timing_enumeration_mitigation_token__', ARGON2_OPTIONS).then((hash: string) => {
-  dummyHash = hash;
-});
+// Compute dummy hash promise once at module load without hardcoded fallback
+export const dummyHashPromise: Promise<string | null> = argon2
+  .hash('__timing_enumeration_mitigation_token__', ARGON2_OPTIONS)
+  .catch((err: unknown) => {
+    const errName = err instanceof Error ? err.name : 'UnknownError';
+    const errMessage = err instanceof Error ? err.message : String(err);
+    logger.error({ errName, errMessage }, 'Argon2 dummy hash generation failed');
+    return null;
+  });
 
 /**
  * Hashes a plaintext password using Argon2id.
@@ -41,7 +44,11 @@ export const verifyPassword = async (hash: string, password: string): Promise<bo
  */
 export const dummyVerifyPassword = async (password: string): Promise<boolean> => {
   try {
-    return await argon2.verify(dummyHash, password);
+    const hash = await dummyHashPromise;
+    if (!hash) {
+      return false;
+    }
+    return await argon2.verify(hash, password);
   } catch {
     return false;
   }

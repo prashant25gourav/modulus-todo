@@ -29,7 +29,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
   try {
     const payload = verifyAccessToken(token);
-    const user = await User.findById(payload.sub);
+    const user = await User.findById(payload.sub).select('-passwordHash');
 
     if (!user) {
       res.status(401).json({
