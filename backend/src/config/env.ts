@@ -9,6 +9,10 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required and cannot be empty'),
   CORS_ORIGIN: z.string().default('*'),
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'JWT_ACCESS_SECRET must be at least 32 characters long'),
+  ACCESS_TOKEN_TTL: z.string().default('15m'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -30,12 +34,14 @@ export const validateEnv = (envInput: Record<string, unknown> = process.env): En
   return result.data;
 };
 
-// Singleton configuration validated at module import time (except during tests that mock process.env)
+// Singleton configuration validated at module import time (safe defaults for test mode)
 export const env: EnvConfig = process.env.NODE_ENV === 'test'
   ? {
       PORT: 5000,
       NODE_ENV: 'test',
       MONGODB_URI: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/modulus_test',
       CORS_ORIGIN: '*',
+      JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'test_jwt_access_secret_for_vitest_min_32_chars_ok!',
+      ACCESS_TOKEN_TTL: '15m',
     }
   : validateEnv(process.env);
