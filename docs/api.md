@@ -14,7 +14,7 @@ This document provides a comprehensive specification of the Modulus Todo REST AP
   - Registration payload strictly requires `{ email, password }` with no `name` field, returning user `{ id, email, createdAt, updatedAt }` *(verified in code: `backend/src/controllers/auth.controller.ts`, `backend/src/models/user.model.ts`)*.
   - Logout returns `204 No Content` with an empty response body *(verified in code: `backend/src/controllers/auth.controller.ts`)*.
   - Logout-all returns `{ status: "ok", message: "All sessions logged out successfully" }` *(verified in code: `backend/src/controllers/auth.controller.ts`)*.
-  - Standard and validation error envelope shapes include `status: "error"` *(verified in code: `backend/src/app.ts`, `backend/src/middleware/validate.middleware.ts`)*.
+  - Standard and validation error envelope shapes: `{ status: "error", message }` and `{ status: "error", message: "Validation failed", errors: [...] }` with no `code` or `details` fields *(verified in code: `backend/src/app.ts`, `backend/src/middleware/validate.middleware.ts`)*.
   - Token lifetimes: `15m` access token, `7d` refresh token, `10s` refresh grace window *(verified in code: `backend/src/config/env.ts`, `backend/src/services/token.service.ts`)*.
   - Rate limiting parameters: `10` req/15m for register/login, `30` req/15m for refresh, `200` req/15m global *(verified in code: `backend/src/app.ts`, `backend/src/routes/auth.routes.ts`)*.
   - Tie-stable pagination sort contracts (`createdAt desc, _id desc` and `deadline asc/desc, _id asc/desc`) *(verified in code: `backend/src/services/task.service.ts`)*.
@@ -46,7 +46,7 @@ Rate limits are applied per client IP using `express-rate-limit` with standard `
 | **Refresh Limiter** (`/refresh`) | 30 requests | 15 minutes | `backend/src/routes/auth.routes.ts`, `backend/src/app.ts` |
 
 ### 1.4 Error Response Shape *(verified in code: `backend/src/app.ts`, `backend/src/middleware/validate.middleware.ts`)*
-All error responses consistently return a JSON envelope containing a `status: "error"` key without exposing server stack traces or internal diagnostics:
+All error responses consistently return a JSON envelope containing a `status: "error"` key without exposing server stack traces or internal diagnostics. The response body contains `message` (and an optional `errors` array for validation errors only); it contains no `code` or `details` fields:
 
 - **Standard Operational Error** (`400`, `401`, `404`, `409`, `429`, `500`):
   ```json
