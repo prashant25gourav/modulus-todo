@@ -19,6 +19,10 @@ describe('Environment Validation', () => {
     expect(validConfig.ACCESS_TOKEN_TTL).toBe('30m');
     expect(validConfig.AUTH_RATE_LIMIT_WINDOW_MS).toBe(900000);
     expect(validConfig.AUTH_RATE_LIMIT_MAX).toBe(20);
+    expect(validConfig.REFRESH_TOKEN_TTL_DAYS).toBe(30);
+    expect(validConfig.REFRESH_GRACE_SECONDS).toBe(10);
+    expect(validConfig.REFRESH_RATE_LIMIT_MAX).toBe(60);
+    expect(validConfig.REFRESH_RATE_LIMIT_WINDOW_MS).toBe(900000);
   });
 
   it('should accept custom rate limit environment variables', () => {
@@ -31,6 +35,22 @@ describe('Environment Validation', () => {
 
     expect(config.AUTH_RATE_LIMIT_WINDOW_MS).toBe(60000);
     expect(config.AUTH_RATE_LIMIT_MAX).toBe(5);
+  });
+
+  it('should accept custom refresh token and rate limit variables', () => {
+    const config = validateEnv({
+      MONGODB_URI: 'mongodb://localhost:27017/test_db',
+      JWT_ACCESS_SECRET: 'super_secret_jwt_access_token_key_at_least_32_chars_long!',
+      REFRESH_TOKEN_TTL_DAYS: '14',
+      REFRESH_GRACE_SECONDS: '15',
+      REFRESH_RATE_LIMIT_MAX: '100',
+      REFRESH_RATE_LIMIT_WINDOW_MS: '60000',
+    });
+
+    expect(config.REFRESH_TOKEN_TTL_DAYS).toBe(14);
+    expect(config.REFRESH_GRACE_SECONDS).toBe(15);
+    expect(config.REFRESH_RATE_LIMIT_MAX).toBe(100);
+    expect(config.REFRESH_RATE_LIMIT_WINDOW_MS).toBe(60000);
   });
 
   it('should fail fast with clear error message when MONGODB_URI is missing', () => {

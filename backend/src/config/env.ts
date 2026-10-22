@@ -18,6 +18,10 @@ export const envSchema = z.object({
     .default('15m'),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(20),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  REFRESH_GRACE_SECONDS: z.coerce.number().int().min(0).max(300).default(10),
+  REFRESH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  REFRESH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(15 * 60 * 1000),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -50,5 +54,9 @@ export const env: EnvConfig = process.env.NODE_ENV === 'test'
       ACCESS_TOKEN_TTL: '15m',
       AUTH_RATE_LIMIT_WINDOW_MS: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
       AUTH_RATE_LIMIT_MAX: Number(process.env.AUTH_RATE_LIMIT_MAX) || 1000,
+      REFRESH_TOKEN_TTL_DAYS: Number(process.env.REFRESH_TOKEN_TTL_DAYS) || 30,
+      REFRESH_GRACE_SECONDS: Number(process.env.REFRESH_GRACE_SECONDS) || 10,
+      REFRESH_RATE_LIMIT_MAX: Number(process.env.REFRESH_RATE_LIMIT_MAX) || 1000,
+      REFRESH_RATE_LIMIT_WINDOW_MS: Number(process.env.REFRESH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     }
   : validateEnv(process.env);
