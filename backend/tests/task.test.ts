@@ -182,7 +182,7 @@ describe('Task API Integration Suite', () => {
   });
 
   describe('Completion Pipeline & Idempotency', () => {
-    it('should mark task completed and set completedAt on PUT /completion', async () => {
+    it('should mark task completed and set completedAt on PUT /completion, advancing updatedAt', async () => {
       const task = await Task.create({
         userId: user1Id,
         title: 'Task To Complete',
@@ -191,6 +191,9 @@ describe('Task API Integration Suite', () => {
         priority: 'medium',
         completed: false,
       });
+
+      const initialUpdatedAt = task.updatedAt.toISOString();
+      await new Promise((r) => setTimeout(r, 20));
 
       const res = await request(app)
         .put(`/api/tasks/${task._id}/completion`)
@@ -201,36 +204,89 @@ describe('Task API Integration Suite', () => {
       expect(res.body.status).toBeUndefined();
       expect(res.body.task.completed).toBe(true);
       expect(res.body.task.completedAt).not.toBeNull();
+      // On real change (false -> true), updatedAt advances
+      expect(new Date(res.body.task.updatedAt).getTime()).toBeGreaterThan(new Date(initialUpdatedAt).getTime());
     });
 
-    it('should preserve original completedAt when re-completing an already completed task', async () => {
-      const originalCompletedAt = new Date('2026-10-21T15:30:00.000Z');
+    it('should preserve original completedAt exactly across two re-completing calls, while updatedAt advances', async () => {
       const task = await Task.create({
         userId: user1Id,
-        title: 'Already Completed Task',
+        title: 'Idempotency Test Task',
         scheduledAt: new Date('2026-10-21T10:00:00.000Z'),
         deadline: new Date('2026-10-21T18:00:00.000Z'),
         priority: 'high',
-        completed: true,
-        completedAt: originalCompletedAt,
+        completed: false,
       });
 
-      // Call completion again with completed: true
-      const res = await request(app)
+      // Call 1: complete task
+      const call1 = await request(app)
         .put(`/api/tasks/${task._id}/completion`)
         .set('Authorization', `Bearer ${user1Token}`)
         .send({ completed: true });
+      expect(call1.status).toBe(200);
+      const firstCompletedAt = call1.body.task.completedAt;
+      const firstUpdatedAt = call1.body.task.updatedAt;
 
-      expect(res.status).toBe(200);
-      expect(res.body.task.completed).toBe(true);
-      // completedAt must be preserved exactly
-      expect(new Date(res.body.task.completedAt).toISOString()).toBe(originalCompletedAt.toISOString());
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Call 2: re-complete with true (no-op value change)
+      const call2 = await request(app)
+        .put(`/api/tasks/${task._id}/completion`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ completed: true });
+      expect(call2.status).toBe(200);
+
+      // completedAt is preserved exactly across calls
+      expect(call2.body.task.completedAt).toBe(firstCompletedAt);
+      // updatedAt advances even on no-op because findOneAndUpdate touches document metadata
+      expect(new Date(call2.body.task.updatedAt).getTime()).toBeGreaterThan(new Date(firstUpdatedAt).getTime());
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Call 3: re-complete again with true (second no-op)
+      const call3 = await request(app)
+        .put(`/api/tasks/${task._id}/completion`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ completed: true });
+      expect(call3.status).toBe(200);
+
+      // completedAt remains unchanged across all calls
+      expect(call3.body.task.completedAt).toBe(firstCompletedAt);
+      // updatedAt advances again
+      expect(new Date(call3.body.task.updatedAt).getTime()).toBeGreaterThan(new Date(call2.body.task.updatedAt).getTime());
     });
 
-    it('should clear completedAt when marking completed: false', async () => {
+    it('should treat completed:false on an incomplete task as a no-op, preserving null completedAt while advancing updatedAt', async () => {
       const task = await Task.create({
         userId: user1Id,
-        title: 'Uncomplete Task',
+        title: 'Already Incomplete Task',
+        scheduledAt: new Date(fixedNow.getTime() - 7200000),
+        deadline: new Date(fixedNow.getTime() + 7200000),
+        priority: 'medium',
+        completed: false,
+        completedAt: null,
+      });
+
+      const initialUpdatedAt = task.updatedAt.toISOString();
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Send completed: false on already incomplete task
+      const res = await request(app)
+        .put(`/api/tasks/${task._id}/completion`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ completed: false });
+
+      expect(res.status).toBe(200);
+      expect(res.body.task.completed).toBe(false);
+      expect(res.body.task.completedAt).toBeNull();
+      // On no-op (false -> false), updatedAt still advances due to document write
+      expect(new Date(res.body.task.updatedAt).getTime()).toBeGreaterThan(new Date(initialUpdatedAt).getTime());
+    });
+
+    it('should clear completedAt when transitioning from completed: true to completed: false', async () => {
+      const task = await Task.create({
+        userId: user1Id,
+        title: 'Transition To Incomplete Task',
         scheduledAt: new Date(fixedNow.getTime() - 7200000),
         deadline: new Date(fixedNow.getTime() + 7200000),
         priority: 'medium',

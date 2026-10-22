@@ -88,10 +88,10 @@ const taskSchema = new Schema<ITask>(
   }
 );
 
-// Four compound indexes serving task queries with deterministic _id tie-breaker
+// Compound indexes verified by query planner executionStats
+// 1. Default list and createdAt sorts, plus tag-filtered list sorting:
 taskSchema.index({ userId: 1, createdAt: -1, _id: -1 });
-taskSchema.index({ userId: 1, completed: 1, deadline: 1, _id: -1 });
-taskSchema.index({ userId: 1, completed: 1, priority: 1, deadline: 1, _id: -1 });
-taskSchema.index({ userId: 1, tags: 1, _id: -1 });
+// 2. Status filtered (pending/completed) deadline sorting (both asc and desc zero in-memory sort):
+taskSchema.index({ userId: 1, completed: 1, deadline: 1, _id: 1 });
 
 export const Task = model<ITask>('Task', taskSchema);

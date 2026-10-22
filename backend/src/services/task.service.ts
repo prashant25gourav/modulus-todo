@@ -125,13 +125,7 @@ export const completeTask = async (
         $set: {
           completed,
           completedAt: completed
-            ? {
-                $cond: {
-                  if: { $eq: ['$completedAt', null] },
-                  then: now,
-                  else: '$completedAt',
-                },
-              }
+            ? { $ifNull: ['$completedAt', now] }
             : null,
         },
       },
