@@ -90,7 +90,7 @@ export const rotateRefreshToken = async (rawRefreshToken: string): Promise<Rotat
       expiresAt: { $gt: new Date() },
     },
     { $set: { usedAt: new Date() } },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   if (freshToken) {
@@ -129,7 +129,7 @@ export const rotateRefreshToken = async (rawRefreshToken: string): Promise<Rotat
           revokedAt: null,
         },
         { $set: { graceIssuedAt: new Date() } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       if (graceToken) {
