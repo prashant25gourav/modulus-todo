@@ -30,11 +30,6 @@ build/
 *.keystore
 local.properties
 
-# iOS build artifacts
-**/ios/build/
-**/ios/Pods/
-**/ios/Podfile.lock
-
 # IDE and Editor files
 .idea/
 .vscode/
