@@ -6,6 +6,7 @@ import pino from 'pino';
 import pinoHttp from 'pino-http';
 import { getDbState } from './config/db';
 import authRoutes from './routes/auth.routes';
+import taskRoutes from './routes/task.routes';
 
 const app = express();
 
@@ -78,6 +79,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Authentication routes
 app.use('/api/auth', authRoutes);
+
+// Task management routes
+app.use('/api/tasks', taskRoutes);
 
 // 404 handler for unknown routes
 app.use((_req: Request, res: Response) => {
