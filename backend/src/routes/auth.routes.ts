@@ -8,8 +8,11 @@ import {
   logout,
   logoutAll,
   me,
+  authCredentialsSchema,
+  refreshTokenSchema,
 } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import { validateBody } from '../middleware/validate.middleware';
 
 export interface AuthLimiterOptions {
   windowMs?: number;
@@ -59,12 +62,12 @@ export const refreshLimiter = createRefreshLimiter();
 
 const router = Router();
 
-// Strict rate limiting for credential-based authentication
-router.post('/register', authLimiter, register);
-router.post('/login', authLimiter, login);
+// Strict rate limiting and validation for credential-based authentication
+router.post('/register', authLimiter, validateBody(authCredentialsSchema), register);
+router.post('/login', authLimiter, validateBody(authCredentialsSchema), login);
 
-// Dedicated rate limiting for token refresh
-router.post('/refresh', refreshLimiter, refresh);
+// Dedicated rate limiting and validation for token refresh
+router.post('/refresh', refreshLimiter, validateBody(refreshTokenSchema), refresh);
 
 // Session revocation endpoints
 router.post('/logout', logout);

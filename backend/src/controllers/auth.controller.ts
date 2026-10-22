@@ -8,6 +8,7 @@ import {
   revokeToken,
   revokeAllUserTokens,
 } from '../services/token.service';
+import { AppError, asyncHandler } from '../utils/errors';
 
 // Validation schemas with strict string validation
 export const authCredentialsSchema = z.object({
@@ -31,24 +32,9 @@ export const refreshTokenSchema = z.object({
 
 /**
  * Register a new user account.
- * Validates input, hashes password, saves user, and issues a token pair.
  */
-export const register = async (req: Request, res: Response): Promise<void> => {
-  // Validate input before any hashing or database calls
-  const parseResult = authCredentialsSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    res.status(400).json({
-      status: 'error',
-      message: 'Validation failed',
-      errors: parseResult.error.issues.map((issue) => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
-    });
-    return;
-  }
-
-  const { email, password } = parseResult.data;
+export const register = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = res.locals.body as z.infer<typeof authCredentialsSchema>;
 
   try {
     const passwordHash = await hashPassword(password);
@@ -64,59 +50,29 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       refreshToken,
     });
   } catch (error: unknown) {
-    // Catch duplicate key error code 11000 from MongoDB unique index
     if ((error as { code?: number }).code === 11000) {
-      res.status(409).json({
-        status: 'error',
-        message: 'An account with this email already exists',
-      });
-      return;
+      throw new AppError('An account with this email already exists', 409);
     }
-
     throw error;
   }
-};
+});
 
 /**
  * Authenticate existing user with email and password.
- * Returns identical 401 error and equalized timing for unknown email vs wrong password.
  */
-export const login = async (req: Request, res: Response): Promise<void> => {
-  // Validate input before any hashing or database calls
-  const parseResult = authCredentialsSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    res.status(400).json({
-      status: 'error',
-      message: 'Validation failed',
-      errors: parseResult.error.issues.map((issue) => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
-    });
-    return;
-  }
-
-  const { email, password } = parseResult.data;
+export const login = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = res.locals.body as z.infer<typeof authCredentialsSchema>;
 
   const user = await User.findOne({ email });
 
   if (!user) {
-    // Equalize timing against startup dummy hash when email does not exist
     await dummyVerifyPassword(password);
-    res.status(401).json({
-      status: 'error',
-      message: 'Invalid email or password',
-    });
-    return;
+    throw new AppError('Invalid email or password', 401);
   }
 
   const isValidPassword = await verifyPassword(user.passwordHash, password);
   if (!isValidPassword) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Invalid email or password',
-    });
-    return;
+    throw new AppError('Invalid email or password', 401);
   }
 
   const { accessToken, refreshToken } = await issueTokenPair(user._id);
@@ -127,33 +83,18 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     accessToken,
     refreshToken,
   });
-};
+});
 
 /**
  * Rotate refresh token with grace window handling and reuse detection.
  */
-export const refresh = async (req: Request, res: Response): Promise<void> => {
-  const parseResult = refreshTokenSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    res.status(400).json({
-      status: 'error',
-      message: 'Validation failed',
-      errors: parseResult.error.issues.map((issue) => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
-    });
-    return;
-  }
+export const refresh = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { refreshToken: rawRefreshToken } = res.locals.body as z.infer<typeof refreshTokenSchema>;
 
-  const result = await rotateRefreshToken(parseResult.data.refreshToken);
+  const result = await rotateRefreshToken(rawRefreshToken);
 
   if (!result.success) {
-    res.status(result.status).json({
-      status: 'error',
-      message: result.message,
-    });
-    return;
+    throw new AppError(result.message, result.status);
   }
 
   res.setHeader('Cache-Control', 'no-store');
@@ -161,30 +102,26 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
   });
-};
+});
 
 /**
- * Logout single session by revoking the refresh token. Idempotent.
+ * Logout single session by revoking the refresh token. Idempotent (returns 204).
  */
-export const logout = async (req: Request, res: Response): Promise<void> => {
+export const logout = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   const rawToken = req.body?.refreshToken;
   if (typeof rawToken === 'string' && /^[0-9a-f]{64}$/.test(rawToken)) {
     await revokeToken(rawToken);
   }
 
   res.status(204).send();
-};
+});
 
 /**
  * Logout all sessions belonging to the authenticated user.
  */
-export const logoutAll = async (req: Request, res: Response): Promise<void> => {
+export const logoutAll = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Unauthorized',
-    });
-    return;
+    throw new AppError('Unauthorized', 401);
   }
 
   await revokeAllUserTokens(req.user._id);
@@ -193,21 +130,17 @@ export const logoutAll = async (req: Request, res: Response): Promise<void> => {
     status: 'ok',
     message: 'All sessions logged out successfully',
   });
-};
+});
 
 /**
  * Get profile of currently authenticated user.
  */
-export const me = async (req: Request, res: Response): Promise<void> => {
+export const me = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Unauthorized',
-    });
-    return;
+    throw new AppError('Unauthorized', 401);
   }
 
   res.status(200).json({
     user: req.user.toJSON(),
   });
-};
+});
