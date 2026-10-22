@@ -1,6 +1,6 @@
 declare const __DEV__: boolean;
 
-export const PROD_API_URL = 'https://modulus-todo-api.onrender.com';
+export const PROD_API_URL = 'https://modulus-todo.onrender.com';
 
 export const API_BASE_URL =
   typeof __DEV__ !== 'undefined' && __DEV__
