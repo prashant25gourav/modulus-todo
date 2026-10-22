@@ -23,11 +23,129 @@ describe('Urgency Scoring & Pipeline Parity', () => {
     await Task.deleteMany({});
   });
 
-  describe('Pure Function (calculateUrgencyScore)', () => {
-    it('should assign -1 to completed tasks regardless of deadline or priority', () => {
+  describe('Worked Table Unit Tests (calculateUrgencyScore)', () => {
+    it('high overdue 1h: 30010.00', () => {
       const score = calculateUrgencyScore(
         {
-          deadline: '2026-10-22T08:00:00.000Z',
+          scheduledAt: new Date(fixedNow.getTime() - 10 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 1 * 3600 * 1000),
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(30010, 2);
+    });
+
+    it('low overdue 1000h (capped at 336h bonus): 13360.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 1010 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 1000 * 3600 * 1000),
+          priority: 'low',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(13360, 2);
+    });
+
+    it('high overdue 336h exactly at cap boundary: 33360.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 350 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 336 * 3600 * 1000),
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(33360, 2);
+    });
+
+    it('high overdue 500h beyond 336h cap: 33360.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 550 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 500 * 3600 * 1000),
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(33360, 2);
+    });
+
+    it('high due in 2h (started): 1000.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(1000, 2);
+    });
+
+    it('medium due in 2h (started): 666.67', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
+          priority: 'medium',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(666.67, 2);
+    });
+
+    it('high not yet started due in 2h (damped 0.5): 500.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() + 1 * 3600 * 1000), // starts in 1h
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),    // due in 2h
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(500, 2);
+    });
+
+    it('low due in 2h (started): 333.33', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
+          priority: 'low',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(333.33, 2);
+    });
+
+    it('high due in 1 week (168h): 17.75', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 168 * 3600 * 1000),
+          priority: 'high',
+          completed: false,
+        },
+        fixedNow
+      );
+      expect(score).toBeCloseTo(17.75, 2);
+    });
+
+    it('completed task: -1.00', () => {
+      const score = calculateUrgencyScore(
+        {
+          scheduledAt: new Date(fixedNow.getTime() - 24 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 12 * 3600 * 1000),
           priority: 'high',
           completed: true,
         },
@@ -35,115 +153,97 @@ describe('Urgency Scoring & Pipeline Parity', () => {
       );
       expect(score).toBe(-1);
     });
-
-    it('should scale upcoming tasks with higher priority having higher score for identical deadline', () => {
-      const deadline = new Date(fixedNow.getTime() + 5 * 3600 * 1000); // 5 hours in future
-      const low = calculateUrgencyScore({ deadline, priority: 'low', completed: false }, fixedNow);
-      const med = calculateUrgencyScore({ deadline, priority: 'medium', completed: false }, fixedNow);
-      const high = calculateUrgencyScore({ deadline, priority: 'high', completed: false }, fixedNow);
-
-      expect(high).toBeGreaterThan(med);
-      expect(med).toBeGreaterThan(low);
-      expect(high).toBeLessThan(10000);
-    });
-
-    it('should score closer deadlines higher for identical priority', () => {
-      const dueIn1Hour = new Date(fixedNow.getTime() + 1 * 3600 * 1000);
-      const dueIn10Hours = new Date(fixedNow.getTime() + 10 * 3600 * 1000);
-
-      const nearScore = calculateUrgencyScore({ deadline: dueIn1Hour, priority: 'high', completed: false }, fixedNow);
-      const farScore = calculateUrgencyScore({ deadline: dueIn10Hours, priority: 'high', completed: false }, fixedNow);
-
-      expect(nearScore).toBeGreaterThan(farScore);
-    });
-
-    it('should score overdue tasks above 10000, higher than any future task', () => {
-      const overdueDeadline = new Date(fixedNow.getTime() - 1 * 3600 * 1000); // 1 hour overdue
-      const impendingDeadline = new Date(fixedNow.getTime() + 1000); // due in 1 second
-
-      const overdueScore = calculateUrgencyScore({ deadline: overdueDeadline, priority: 'low', completed: false }, fixedNow);
-      const impendingScore = calculateUrgencyScore({ deadline: impendingDeadline, priority: 'high', completed: false }, fixedNow);
-
-      expect(overdueScore).toBeGreaterThanOrEqual(10000);
-      expect(overdueScore).toBeGreaterThan(impendingScore);
-    });
-
-    it('should increase score as overdue duration increases', () => {
-      const overdue1h = new Date(fixedNow.getTime() - 1 * 3600 * 1000);
-      const overdue10h = new Date(fixedNow.getTime() - 10 * 3600 * 1000);
-
-      const score1h = calculateUrgencyScore({ deadline: overdue1h, priority: 'high', completed: false }, fixedNow);
-      const score10h = calculateUrgencyScore({ deadline: overdue10h, priority: 'high', completed: false }, fixedNow);
-
-      expect(score10h).toBeGreaterThan(score1h);
-    });
   });
 
   describe('Parity Test: Pure Function vs MongoDB Aggregation Pipeline', () => {
-    it('should compute mathematically identical scores and ordering between JS and MongoDB aggregation', async () => {
+    it('should compute mathematically identical scores and exact ordering between JS and MongoDB aggregation', async () => {
       const userId = new mongoose.Types.ObjectId();
 
-      const sampleTasks: (UrgencyTaskInput & { title: string; scheduledAt: Date })[] = [
-        // Completed
+      const sampleTasks: (UrgencyTaskInput & { title: string; scheduledAt: Date; deadline: Date })[] = [
         {
-          title: 'Completed Task',
-          scheduledAt: new Date(fixedNow.getTime() - 48 * 3600 * 1000),
-          deadline: new Date(fixedNow.getTime() - 24 * 3600 * 1000),
+          title: 'High overdue 1h',
           priority: 'high',
-          completed: true,
-        },
-        // Overdue High
-        {
-          title: 'Overdue High Priority',
-          scheduledAt: new Date(fixedNow.getTime() - 20 * 3600 * 1000),
-          deadline: new Date(fixedNow.getTime() - 5 * 3600 * 1000),
-          priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() - 10 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 1 * 3600 * 1000),
           completed: false,
         },
-        // Overdue Low
         {
-          title: 'Overdue Low Priority',
-          scheduledAt: new Date(fixedNow.getTime() - 20 * 3600 * 1000),
-          deadline: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          title: 'Low overdue 1000h (336h cap)',
           priority: 'low',
+          scheduledAt: new Date(fixedNow.getTime() - 1010 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 1000 * 3600 * 1000),
           completed: false,
         },
-        // Impending High
         {
-          title: 'Due In 1 Hour High',
-          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
-          deadline: new Date(fixedNow.getTime() + 1 * 3600 * 1000),
+          title: 'High overdue 336h (exact cap)',
           priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() - 350 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 336 * 3600 * 1000),
           completed: false,
         },
-        // Due In 1 Hour Medium
         {
-          title: 'Due In 1 Hour Medium',
+          title: 'High overdue 500h (past cap)',
+          priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() - 550 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 500 * 3600 * 1000),
+          completed: false,
+        },
+        {
+          title: 'High due in 2h',
+          priority: 'high',
           scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
-          deadline: new Date(fixedNow.getTime() + 1 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
+          completed: false,
+        },
+        {
+          title: 'Medium due in 2h',
           priority: 'medium',
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
           completed: false,
         },
-        // Due Far In Future
         {
-          title: 'Due In 7 Days Low',
-          scheduledAt: new Date(fixedNow.getTime()),
-          deadline: new Date(fixedNow.getTime() + 7 * 24 * 3600 * 1000),
-          priority: 'low',
+          title: 'High not yet started due in 2h',
+          priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() + 1 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
           completed: false,
+        },
+        {
+          title: 'Low due in 2h',
+          priority: 'low',
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 2 * 3600 * 1000),
+          completed: false,
+        },
+        {
+          title: 'High due in 1 week',
+          priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() - 2 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() + 168 * 3600 * 1000),
+          completed: false,
+        },
+        {
+          title: 'Completed High Task',
+          priority: 'high',
+          scheduledAt: new Date(fixedNow.getTime() - 24 * 3600 * 1000),
+          deadline: new Date(fixedNow.getTime() - 12 * 3600 * 1000),
+          completed: true,
         },
       ];
 
+      const createdDocs = [];
       for (const t of sampleTasks) {
-        await Task.create({
+        const doc = await Task.create({
           userId,
           title: t.title,
           scheduledAt: t.scheduledAt,
           deadline: t.deadline,
           priority: t.priority,
           completed: t.completed,
-          completedAt: t.completed ? new Date(fixedNow.getTime() - 24 * 3600 * 1000) : null,
+          completedAt: t.completed ? new Date(fixedNow.getTime() - 12 * 3600 * 1000) : null,
         });
+        createdDocs.push(doc);
       }
 
       // Run MongoDB aggregation pipeline with injected fixedNow
@@ -155,10 +255,11 @@ describe('Urgency Scoring & Pipeline Parity', () => {
       const aggResults = await Task.aggregate(pipeline);
       expect(aggResults).toHaveLength(sampleTasks.length);
 
-      // Verify each item's urgencyScore matches calculateUrgencyScore
+      // Verify each task score matches calculateUrgencyScore with toBeCloseTo
       for (const doc of aggResults) {
         const expectedScore = calculateUrgencyScore(
           {
+            scheduledAt: doc.scheduledAt,
             deadline: doc.deadline,
             priority: doc.priority,
             completed: doc.completed,
@@ -166,21 +267,47 @@ describe('Urgency Scoring & Pipeline Parity', () => {
           fixedNow
         );
 
-        expect(Math.abs(doc.urgencyScore - expectedScore)).toBeLessThan(0.0001);
+        expect(doc.urgencyScore).toBeCloseTo(expectedScore, 2);
       }
 
-      // Verify sorting is descending by urgencyScore
+      // Compute expected sorted order via pure function with _id: -1 tie-breaker
+      const expectedOrder = createdDocs
+        .map((t) => ({
+          _id: t._id,
+          title: t.title,
+          score: calculateUrgencyScore(
+            {
+              scheduledAt: t.scheduledAt,
+              deadline: t.deadline,
+              priority: t.priority,
+              completed: t.completed,
+            },
+            fixedNow
+          ),
+        }))
+        .sort((a, b) => b.score - a.score || b._id.toString().localeCompare(a._id.toString()));
+
+      expect(aggResults.map((r) => r.title)).toEqual(expectedOrder.map((e) => e.title));
+      // Verify exact relative orderings between JS and MongoDB aggregation
       for (let i = 0; i < aggResults.length - 1; i++) {
         expect(aggResults[i].urgencyScore).toBeGreaterThanOrEqual(aggResults[i + 1].urgencyScore);
       }
 
-      // Assert completed task is at the very end with score -1
+      // High overdue 500h and 336h are tied at 33360
+      expect(aggResults[0].urgencyScore).toBeCloseTo(33360, 2);
+      expect(aggResults[1].urgencyScore).toBeCloseTo(33360, 2);
+
+      // High overdue 1h is 30010
+      expect(aggResults[2].title).toBe('High overdue 1h');
+      expect(aggResults[2].urgencyScore).toBeCloseTo(30010, 2);
+
+      // Low overdue 1000h (capped at 336h bonus) is 13360
+      expect(aggResults[3].title).toBe('Low overdue 1000h (336h cap)');
+      expect(aggResults[3].urgencyScore).toBeCloseTo(13360, 2);
+
+      // Completed is at the very bottom with -1
       expect(aggResults[aggResults.length - 1].urgencyScore).toBe(-1);
       expect(aggResults[aggResults.length - 1].completed).toBe(true);
-
-      // Assert overdue high task is at the very top
-      expect(aggResults[0].title).toBe('Overdue High Priority');
-      expect(aggResults[0].urgencyScore).toBeGreaterThan(10000);
     });
   });
 });

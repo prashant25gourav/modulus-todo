@@ -4,6 +4,7 @@ export interface UrgencyTaskInput {
   deadline: Date | string;
   priority: TaskPriority;
   completed: boolean;
+  scheduledAt?: Date | string;
 }
 
 export const PRIORITY_WEIGHTS: Record<TaskPriority, number> = {
@@ -13,8 +14,10 @@ export const PRIORITY_WEIGHTS: Record<TaskPriority, number> = {
 };
 
 /**
- * Pure function to calculate task urgency score mixing time-to-deadline and priority.
- * Injected with 'now' (default: new Date()) for deterministic calculation and parity testing.
+ * Pure function to calculate task urgency score mixing time-to-deadline, priority, and scheduledAt.
+ * Overdue: priority dominates (10000 * weight + min(overdueHours, 336) * 10).
+ * Upcoming: hyperbolic scaling with 0.5 damping factor for not-yet-started tasks (now < scheduledAt).
+ * Completed: -1.
  */
 export const calculateUrgencyScore = (task: UrgencyTaskInput, now: Date = new Date()): number => {
   if (task.completed) {
@@ -27,20 +30,20 @@ export const calculateUrgencyScore = (task: UrgencyTaskInput, now: Date = new Da
   const weight = PRIORITY_WEIGHTS[task.priority] || 2;
 
   if (diffHours < 0) {
-    // Overdue: base score of 10000 ensures overdue tasks always score higher than future tasks.
-    // Score increases with hours overdue and priority weight.
     const overdueHours = Math.abs(diffHours);
-    return 10000 + overdueHours * 10 * weight;
+    const cappedOverdue = Math.min(overdueHours, 336);
+    return 10000 * weight + cappedOverdue * 10;
   }
 
-  // Upcoming: hyperbolic scaling as deadline approaches, scaled by priority weight.
-  return (1000 / (diffHours + 1)) * weight;
+  const isStarted = task.scheduledAt ? nowMs >= new Date(task.scheduledAt).getTime() : true;
+  const damping = isStarted ? 1.0 : 0.5;
+
+  return (1000 / (diffHours + 1)) * weight * damping;
 };
 
 /**
  * Builds the MongoDB aggregation pipeline stages calculating the identical urgencyScore
  * and sorting by urgencyScore descending with an _id tie-breaker.
- * Injected with 'now' (default: new Date()) for parity testing with calculateUrgencyScore.
  */
 export const buildUrgencyAggregationStages = (now: Date = new Date()) => {
   const nowMs = now.getTime();
@@ -71,18 +74,24 @@ export const buildUrgencyAggregationStages = (now: Date = new Date()) => {
                       default: 2,
                     },
                   },
+                  isStarted: {
+                    $cond: {
+                      if: { $ifNull: ['$scheduledAt', false] },
+                      then: { $gte: [nowMs, { $toLong: '$scheduledAt' }] },
+                      else: true,
+                    },
+                  },
                 },
                 in: {
                   $cond: {
                     if: { $lt: ['$$diffHours', 0] },
                     then: {
                       $add: [
-                        10000,
+                        { $multiply: [10000, '$$weight'] },
                         {
                           $multiply: [
-                            { $abs: '$$diffHours' },
+                            { $min: [{ $abs: '$$diffHours' }, 336] },
                             10,
-                            '$$weight',
                           ],
                         },
                       ],
@@ -96,6 +105,13 @@ export const buildUrgencyAggregationStages = (now: Date = new Date()) => {
                           ],
                         },
                         '$$weight',
+                        {
+                          $cond: {
+                            if: '$$isStarted',
+                            then: 1.0,
+                            else: 0.5,
+                          },
+                        },
                       ],
                     },
                   },
