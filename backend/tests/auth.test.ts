@@ -1,3 +1,4 @@
+import express from 'express';
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -8,7 +9,7 @@ import app from '../src/app';
 import { connectDB, disconnectDB } from '../src/config/db';
 import { User } from '../src/models/user.model';
 import { env } from '../src/config/env';
-import { authLimiter } from '../src/routes/auth.routes';
+import { authLimiter, createAuthLimiter } from '../src/routes/auth.routes';
 import * as passwordUtils from '../src/utils/password';
 
 describe('Authentication & Security Integration Suite', () => {
@@ -29,7 +30,6 @@ describe('Authentication & Security Integration Suite', () => {
 
   afterEach(async () => {
     await User.deleteMany({});
-    delete process.env.AUTH_RATE_LIMIT_MAX;
     await authLimiter.resetKey('127.0.0.1');
     await authLimiter.resetKey('::ffff:127.0.0.1');
     await authLimiter.resetKey('::1');
@@ -442,34 +442,41 @@ describe('Authentication & Security Integration Suite', () => {
   });
 
   describe('Auth Rate Limiter', () => {
-    it('should return 429 after exceeding the configured auth rate limit', async () => {
-      // Set limit dynamically to 3 for this test
-      process.env.AUTH_RATE_LIMIT_MAX = '3';
+    it('should return 429 after exceeding the configured auth rate limit using createAuthLimiter', async () => {
+      const testApp = express();
+      testApp.use(express.json());
+      const testLimiter = createAuthLimiter({ limit: 3, windowMs: 60000 });
+      testApp.post('/test-login', testLimiter, (_req, res) => {
+        res.status(200).json({ ok: true });
+      });
 
-      // First 3 requests should proceed through rate limiter
       for (let i = 0; i < 3; i++) {
-        const res = await request(app)
-          .post('/api/auth/login')
-          .send({
-            email: 'limit@example.com',
-            password: 'Password123!',
-          });
-        expect(res.status).toBe(401); // 401 because user does not exist, but limiter allowed
+        const res = await request(testApp).post('/test-login');
+        expect(res.status).toBe(200);
       }
 
-      // 4th request must be blocked with 429
-      const blockedRes = await request(app)
-        .post('/api/auth/login')
-        .send({
-          email: 'limit@example.com',
-          password: 'Password123!',
-        });
-
+      const blockedRes = await request(testApp).post('/test-login');
       expect(blockedRes.status).toBe(429);
       expect(blockedRes.body).toEqual({
         status: 'error',
         message: 'Too many authentication attempts, please try again later.',
       });
+    });
+
+    it('should ensure /me is not affected by the strict auth rate limiter', async () => {
+      const reg = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: 'me-ratelimit@example.com',
+          password: 'Password123!',
+        });
+
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app)
+          .get('/api/auth/me')
+          .set('Authorization', `Bearer ${reg.body.token}`);
+        expect(res.status).toBe(200);
+      }
     });
   });
 });

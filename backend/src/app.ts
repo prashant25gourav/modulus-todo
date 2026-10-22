@@ -64,7 +64,6 @@ app.use(limiter);
 
 // Body parsing with strict 10kb limit
 app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
