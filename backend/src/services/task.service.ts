@@ -1,5 +1,4 @@
-import { AppError } from '../utils/errors';
-import { Types, PipelineStage } from 'mongoose';
+import { Types } from 'mongoose';
 import { Task } from '../models/task.model';
 import { buildUrgencyAggregationStages } from '../utils/urgency';
 import { z } from 'zod';
@@ -8,6 +7,7 @@ import {
   updateTaskSchema,
   taskQuerySchema,
 } from '../schemas/task.schema';
+import { AppError } from '../utils/errors';
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
@@ -59,57 +59,84 @@ export const getTaskById = async (
 };
 
 /**
- * Atomically updates a task belonging to the specified user.
- * Rejects updates where deadline would precede scheduledAt.
+ * Atomically updates a task belonging to the specified user using filter-based date inequality
+ * and exists-based 400 vs 404 split.
  */
 export const updateTask = async (
   userId: Types.ObjectId,
   taskId: string | Types.ObjectId,
   input: UpdateTaskInput
 ): Promise<Record<string, unknown> | null> => {
-  if (input.scheduledAt || input.deadline) {
-    const existing = await Task.findOne({ _id: taskId, userId });
-    if (!existing) {
-      return null;
-    }
-    const targetScheduledAt = input.scheduledAt
-      ? new Date(input.scheduledAt)
-      : existing.scheduledAt;
-    const targetDeadline = input.deadline
-      ? new Date(input.deadline)
-      : existing.deadline;
+  const updatePayload: Record<string, unknown> = { ...input };
+  const filter: Record<string, unknown> = { _id: taskId, userId };
 
-    if (targetDeadline.getTime() < targetScheduledAt.getTime()) {
+  if (input.scheduledAt && input.deadline) {
+    const s = new Date(input.scheduledAt);
+    const d = new Date(input.deadline);
+    if (d.getTime() < s.getTime()) {
       throw new AppError('deadline must be greater than or equal to scheduledAt', 400);
     }
+    updatePayload.scheduledAt = s;
+    updatePayload.deadline = d;
+  } else if (input.deadline) {
+    const d = new Date(input.deadline);
+    updatePayload.deadline = d;
+    // Atomic date check: scheduledAt must be <= new deadline
+    filter.scheduledAt = { $lte: d };
+  } else if (input.scheduledAt) {
+    const s = new Date(input.scheduledAt);
+    updatePayload.scheduledAt = s;
+    // Atomic date check: deadline must be >= new scheduledAt
+    filter.deadline = { $gte: s };
   }
 
-  const updatePayload: Record<string, unknown> = { ...input };
-  if (input.scheduledAt) updatePayload.scheduledAt = new Date(input.scheduledAt);
-  if (input.deadline) updatePayload.deadline = new Date(input.deadline);
-
   const updated = await Task.findOneAndUpdate(
-    { _id: taskId, userId },
+    filter,
     { $set: updatePayload },
-    { new: true, runValidators: true }
+    { returnDocument: 'after', runValidators: true }
   );
 
-  return updated ? (updated.toJSON() as unknown as Record<string, unknown>) : null;
+  if (!updated) {
+    const exists = await Task.exists({ _id: taskId, userId });
+    if (exists) {
+      // Document exists but failed atomic inequality check
+      throw new AppError('deadline must be greater than or equal to scheduledAt', 400);
+    }
+    return null;
+  }
+
+  return updated.toJSON() as unknown as Record<string, unknown>;
 };
 
 /**
- * Atomically marks a task complete or incomplete. Idempotent.
+ * Idempotent task completion via pipeline update preserving existing completedAt.
+ * Uses returnDocument: 'after'.
  */
 export const completeTask = async (
   userId: Types.ObjectId,
   taskId: string | Types.ObjectId,
   completed: boolean
 ): Promise<Record<string, unknown> | null> => {
-  const completedAt = completed ? new Date() : null;
+  const now = new Date();
   const updated = await Task.findOneAndUpdate(
     { _id: taskId, userId },
-    { $set: { completed, completedAt } },
-    { new: true, runValidators: true }
+    [
+      {
+        $set: {
+          completed,
+          completedAt: completed
+            ? {
+                $cond: {
+                  if: { $eq: ['$completedAt', null] },
+                  then: now,
+                  else: '$completedAt',
+                },
+              }
+            : null,
+        },
+      },
+    ],
+    { returnDocument: 'after', updatePipeline: true }
   );
 
   return updated ? (updated.toJSON() as unknown as Record<string, unknown>) : null;
@@ -128,8 +155,7 @@ export const deleteTask = async (
 
 /**
  * Lists tasks for a user with pagination, filtering, escaped capped regex search,
- * and deterministic sorting with _id tie-breaker.
- * Accepts optional 'now' injection for urgency score parity testing.
+ * deterministic sorting with _id tie-breaker, and Task.hydrate on aggregation paths.
  */
 export const listTasks = async (
   userId: Types.ObjectId,
@@ -178,30 +204,20 @@ export const listTasks = async (
     ];
   }
 
-  // Urgency sort pipeline: sortOrder is ignored, always descending urgencyScore with _id tie-breaker
+  // 1. Urgency sort aggregation path: sortOrder ignored, always descending with _id tie-breaker
   if (query.sortBy === 'urgency') {
-    const urgencyPipeline: PipelineStage[] = [
-      { $match: filter },
-      ...buildUrgencyAggregationStages(now),
-      {
-        $facet: {
-          tasks: [
-            { $skip: skip },
-            { $limit: limit },
-          ],
-          totalCount: [
-            { $count: 'count' },
-          ],
-        },
-      },
-    ];
+    const [rawTasks, total] = await Promise.all([
+      Task.aggregate([
+        { $match: filter },
+        ...buildUrgencyAggregationStages(now),
+        { $skip: skip },
+        { $limit: limit },
+      ]),
+      Task.countDocuments(filter),
+    ]);
 
-    const [aggResult] = await Task.aggregate(urgencyPipeline);
-    const rawTasks: Record<string, unknown>[] = aggResult?.tasks || [];
-    const total: number = aggResult?.totalCount?.[0]?.count || 0;
     const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
-
-    const tasks = rawTasks.map((doc) => new Task(doc).toJSON() as unknown as Record<string, unknown>);
+    const tasks = rawTasks.map((doc) => Task.hydrate(doc).toJSON() as unknown as Record<string, unknown>);
 
     return {
       tasks,
@@ -215,18 +231,60 @@ export const listTasks = async (
     };
   }
 
-  // Standard query sorting with deterministic _id tie-breaker
-  const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
-  let sort: Record<string, 1 | -1>;
+  // 2. Priority sort aggregation path with $switch rank (high: 3, medium: 2, low: 1)
+  if (query.sortBy === 'priority') {
+    const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
+    const [rawTasks, total] = await Promise.all([
+      Task.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            priorityRank: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$priority', 'high'] }, then: 3 },
+                  { case: { $eq: ['$priority', 'medium'] }, then: 2 },
+                  { case: { $eq: ['$priority', 'low'] }, then: 1 },
+                ],
+                default: 2,
+              },
+            },
+          },
+        },
+        {
+          $sort: {
+            priorityRank: sortDirection,
+            _id: sortDirection,
+          },
+        },
+        { $skip: skip },
+        { $limit: limit },
+      ]),
+      Task.countDocuments(filter),
+    ]);
 
-  if (query.sortBy === 'deadline') {
-    sort = { deadline: sortDirection, _id: -1 };
-  } else if (query.sortBy === 'priority') {
-    sort = { priority: sortDirection, _id: -1 };
-  } else {
-    // Default: createdAt
-    sort = { createdAt: sortDirection, _id: -1 };
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+    const tasks = rawTasks.map((doc) => Task.hydrate(doc).toJSON() as unknown as Record<string, unknown>);
+
+    return {
+      tasks,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+      },
+    };
   }
+
+  // 3. Find path for createdAt and deadline (tie-breaker follows sortDirection)
+  const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
+  const sortField = query.sortBy === 'deadline' ? 'deadline' : 'createdAt';
+  const sort: Record<string, 1 | -1> = {
+    [sortField]: sortDirection,
+    _id: sortDirection,
+  };
 
   const [docs, total] = await Promise.all([
     Task.find(filter).sort(sort).skip(skip).limit(limit),

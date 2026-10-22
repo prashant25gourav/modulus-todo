@@ -13,7 +13,7 @@ import {
 import { AppError, asyncHandler } from '../utils/errors';
 
 /**
- * Create a new task.
+ * Create a new task. Success returns 201 { task } without status.
  */
 export const createTaskHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
@@ -23,13 +23,12 @@ export const createTaskHandler = asyncHandler(async (req: Request, res: Response
   const input = res.locals.body as CreateTaskInput;
   const task = await createTask(req.user._id, input);
   res.status(201).json({
-    status: 'ok',
     task,
   });
 });
 
 /**
- * List tasks for the authenticated user with pagination, filtering, search, and sorting.
+ * List tasks for the authenticated user. Success returns 200 { tasks, pagination } without status.
  * Note: req.query is never reassigned.
  */
 export const listTasksHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -39,33 +38,29 @@ export const listTasksHandler = asyncHandler(async (req: Request, res: Response)
 
   const query = res.locals.query as TaskQueryInput;
   const result = await listTasks(req.user._id, query);
-  res.status(200).json({
-    status: 'ok',
-    ...result,
-  });
+  res.status(200).json(result);
 });
 
 /**
- * Get a single task by ID. Foreign tasks return 404 to prevent ID probing.
+ * Get a single task by ID. Success returns 200 { task } without status.
  */
 export const getTaskByIdHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
     throw new AppError('Unauthorized', 401);
   }
 
-  const task = await getTaskById(req.user._id, (req.params.id as string));
+  const task = await getTaskById(req.user._id, req.params.id as string);
   if (!task) {
     throw new AppError('Task not found', 404);
   }
 
   res.status(200).json({
-    status: 'ok',
     task,
   });
 });
 
 /**
- * Atomically update task fields with { _id, userId } scoping.
+ * Atomically update task fields with { _id, userId } scoping. Success returns 200 { task } without status.
  */
 export const updateTaskHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
@@ -73,19 +68,18 @@ export const updateTaskHandler = asyncHandler(async (req: Request, res: Response
   }
 
   const input = res.locals.body as UpdateTaskInput;
-  const task = await updateTask(req.user._id, (req.params.id as string), input);
+  const task = await updateTask(req.user._id, req.params.id as string, input);
   if (!task) {
     throw new AppError('Task not found', 404);
   }
 
   res.status(200).json({
-    status: 'ok',
     task,
   });
 });
 
 /**
- * Idempotent task completion via { completed: boolean } with { _id, userId } scoping.
+ * Idempotent task completion via PUT /api/tasks/:id/completion. Success returns 200 { task } without status.
  */
 export const completeTaskHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
@@ -93,32 +87,28 @@ export const completeTaskHandler = asyncHandler(async (req: Request, res: Respon
   }
 
   const { completed } = res.locals.body as { completed: boolean };
-  const task = await completeTask(req.user._id, (req.params.id as string), completed);
+  const task = await completeTask(req.user._id, req.params.id as string, completed);
   if (!task) {
     throw new AppError('Task not found', 404);
   }
 
   res.status(200).json({
-    status: 'ok',
     task,
   });
 });
 
 /**
- * Delete a task scoped to authenticated user.
+ * Delete a task scoped to authenticated user. Success returns 204 No Content.
  */
 export const deleteTaskHandler = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
     throw new AppError('Unauthorized', 401);
   }
 
-  const deleted = await deleteTask(req.user._id, (req.params.id as string));
+  const deleted = await deleteTask(req.user._id, req.params.id as string);
   if (!deleted) {
     throw new AppError('Task not found', 404);
   }
 
-  res.status(200).json({
-    status: 'ok',
-    message: 'Task deleted successfully',
-  });
+  res.status(204).send();
 });

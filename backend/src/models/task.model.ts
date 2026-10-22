@@ -72,6 +72,8 @@ const taskSchema = new Schema<ITask>(
         delete ret.__v;
         ret.id = ret._id ? (ret._id as { toString(): string }).toString() : undefined;
         delete ret._id;
+        delete ret.urgencyScore;
+        delete ret.priorityRank;
 
         // Ensure dates format consistently as UTC ISO strings
         if (ret.scheduledAt instanceof Date) ret.scheduledAt = ret.scheduledAt.toISOString();

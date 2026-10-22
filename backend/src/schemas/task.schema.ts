@@ -96,15 +96,27 @@ export const completeTaskSchema = z
 
 export const taskQuerySchema = z
   .object({
-    page: z.coerce.number().int().min(1).default(1),
+    page: z.coerce.number().int().min(1).max(1000).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
     status: z.enum(['all', 'pending', 'completed']).default('all'),
     priority: z.enum(['low', 'medium', 'high']).optional(),
-    tag: z.string().trim().optional(),
+    tag: z.string().trim().max(30).optional(),
     deadlineFrom: z.string().datetime().optional(),
     deadlineTo: z.string().datetime().optional(),
     search: z.string().trim().max(100).optional(),
     sortBy: z.enum(['createdAt', 'deadline', 'priority', 'urgency']).default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).default('desc'),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) => {
+      if (data.deadlineFrom && data.deadlineTo) {
+        return new Date(data.deadlineFrom).getTime() <= new Date(data.deadlineTo).getTime();
+      }
+      return true;
+    },
+    {
+      message: 'deadlineFrom must be less than or equal to deadlineTo',
+      path: ['deadlineFrom'],
+    }
+  );

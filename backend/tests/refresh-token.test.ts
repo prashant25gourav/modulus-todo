@@ -410,11 +410,7 @@ describe('Refresh Tokens, Rotation and Session Revocation Integration Suite', ()
         .post('/api/auth/logout')
         .send({ refreshToken: reg.body.refreshToken });
 
-      expect(logoutRes.status).toBe(200);
-      expect(logoutRes.body).toEqual({
-        status: 'ok',
-        message: 'Logged out successfully',
-      });
+      expect(logoutRes.status).toBe(204);
 
       // Subsequent refresh must fail with 401
       const refreshRes = await request(app)
@@ -423,26 +419,23 @@ describe('Refresh Tokens, Rotation and Session Revocation Integration Suite', ()
       expect(refreshRes.status).toBe(401);
     });
 
-    it('should return 200 for logout with unknown, expired, revoked, or garbage token without access token', async () => {
+    it('should return 204 for logout with unknown, expired, revoked, or garbage token without access token', async () => {
       // 1. Garbage string
       const garbageRes = await request(app)
         .post('/api/auth/logout')
         .send({ refreshToken: 'not_a_valid_hex_token_garbage' });
-      expect(garbageRes.status).toBe(200);
-      expect(garbageRes.body.status).toBe('ok');
+      expect(garbageRes.status).toBe(204);
 
       // 2. Empty body
       const emptyRes = await request(app).post('/api/auth/logout').send({});
-      expect(emptyRes.status).toBe(200);
-      expect(emptyRes.body.status).toBe('ok');
+      expect(emptyRes.status).toBe(204);
 
       // 3. Unknown 64-hex token
       const unknownToken = crypto.randomBytes(32).toString('hex');
       const unknownRes = await request(app)
         .post('/api/auth/logout')
         .send({ refreshToken: unknownToken });
-      expect(unknownRes.status).toBe(200);
-      expect(unknownRes.body.status).toBe('ok');
+      expect(unknownRes.status).toBe(204);
     });
 
     it('should logout-all sessions belonging to user upon authenticated request', async () => {

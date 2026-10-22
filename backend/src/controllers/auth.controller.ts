@@ -172,10 +172,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     await revokeToken(rawToken);
   }
 
-  res.status(200).json({
-    status: 'ok',
-    message: 'Logged out successfully',
-  });
+  res.status(204).send();
 };
 
 /**
