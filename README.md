@@ -1,6 +1,6 @@
 # Modulus Todo
 
-Modulus Todo is a task management application comprising an Express REST API with MongoDB and an Android client built with React Native. It provides user authentication, task scheduling, dynamic urgency prioritization, and offline-resilient local state management.
+Modulus Todo is a task management application comprising an Express REST API with MongoDB and an Android client built with React Native. It provides user authentication, task scheduling, dynamic urgency prioritization, and responsive task management with optimistic updates.
 
 <p align="center">
   <img src="docs/screenshots/login.png" width="22%" alt="Login" />
@@ -15,7 +15,7 @@ Modulus Todo is a task management application comprising an Express REST API wit
 - Task CRUD operations with scheduling dates, deadlines, priority levels, and custom tags
 - Task sorting by creation date, deadline, priority, or dynamic urgency score
 - Task filtering by status (all, pending, completed) and text search across titles and descriptions
-- Optimistic UI updates with automatic rollback on network failure
+- Task completion and deletion update optimistically and roll back on failure; create and edit wait for the server
 - Token and session storage encrypted using the Android Keystore (via react-native-keychain)
 
 ## Architecture & Tech Stack
@@ -34,8 +34,8 @@ flowchart LR
 ### Prerequisites
 
 - Node.js >= 22.11.0 and npm
-- Android SDK (API 34+) and command-line tools
-- Running MongoDB instance (`docker run -d -p 27017:27017 --name mongo mongo:latest` or a MongoDB Atlas URI)
+- Android SDK (Gradle downloads the required platform; tested on a Pixel 6 API 34 emulator)
+- MongoDB instance (MongoDB Atlas URI, or local Docker container: `docker run -d -p 27017:27017 --name mongo mongo:latest`)
 
 ### Backend Setup
 
@@ -68,7 +68,7 @@ npm test               # executes mobile Jest test suite
 npm run lint           # verifies ESLint compliance
 ```
 
-When testing on a physical Android device instead of an emulator, replace the loopback URL in `mobile/src/config.ts` with your development machine's LAN IP address.
+The debug build talks to the local backend at http://10.0.2.2:5000; the release APK talks to https://modulus-todo.onrender.com. When testing on a physical Android device instead of an emulator, replace the loopback URL in `mobile/src/config.ts` with your development machine's LAN IP address.
 
 ## Environment Variables
 
@@ -79,7 +79,7 @@ Backend environment configuration (`backend/.env` validated via `backend/src/con
 | `PORT` | HTTP port for the Express API server | No | `5000` |
 | `NODE_ENV` | Runtime environment (`development`, `production`, `test`) | No | `development` |
 | `MONGODB_URI` | MongoDB connection string URI | Yes | - |
-| `CORS_ORIGIN` | Allowed CORS origin header for browser requests | No | `*` |
+| `CORS_ORIGIN` | Allowed CORS origin (only affects browser clients; native mobile apps do not enforce CORS) | No | `*` |
 | `JWT_ACCESS_SECRET` | Secret key for signing HS256 access tokens (min 32 characters) | Yes | - |
 | `ACCESS_TOKEN_TTL` | Access token validity duration string | No | `15m` |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | Time window in milliseconds for login/register rate limiting | No | `900000` (15m) |
@@ -102,17 +102,17 @@ Complete endpoint specifications, request/response envelopes, and error contract
 - Urgency score formula computed dynamically on query: completed tasks receive -1; overdue tasks receive 10000 * weight + min(overdueHours, 336) * 10; upcoming tasks receive (1000 / (hoursLeft + 1)) * weight (halved if scheduled start is in the future); priority weights are high 3, medium 2, low 1.
 - The mobile API client implements a single-flight refresh queue to prevent stampeding the refresh endpoint on concurrent 401 responses.
 - Auth credentials on Android are encrypted using the Android Keystore (via react-native-keychain).
-- Task mutations employ optimistic Zustand updates that reflect immediately in the UI and automatically roll back on network failure.
+- Task completion and deletion update optimistically in Zustand and roll back on failure; create and edit operations wait for the server before updating state.
 
 ## Known Limitations
 
 - Access tokens are stateless with a 15-minute lifetime until expiration.
 - Free Render hosting tier cold-starts can take up to about a minute on initial requests; the mobile client timeout is set to 60s.
 - The mobile release APK is signed with the Android debug keystore for submission evaluation.
-- Binary builds are compiled for 64-bit Android architectures (`arm64-v8a` and `x86_64`).
+- Binary builds are compiled for `x86_64` and `arm64-v8a` architectures (`reactNativeArchitectures=x86_64,arm64-v8a` in `mobile/android/gradle.properties`).
 - iOS is not built or supported for this submission.
 
 ## Download & Deployment
 
-- Release APK: <APK_LINK>
+- Release APK: [app-release.apk](https://github.com/prashant25gourav/modulus-todo/releases/download/v1.0.0/app-release.apk)
 - Live Production API: `https://modulus-todo.onrender.com`
