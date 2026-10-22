@@ -1,8 +1,10 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-// Load variables from .env file if present
-dotenv.config();
+// Load variables from .env file if present (skip in test environment for hermetic test runs)
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config();
+}
 
 export const envSchema = z.object({
   PORT: z.coerce.number().default(5000),

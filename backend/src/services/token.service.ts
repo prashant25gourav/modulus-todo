@@ -40,12 +40,6 @@ export class FamilyRevokedError extends Error {
   }
 }
 
-// Optional hook to simulate pause/concurrency races between compare-and-set and create in tests
-export let preCreateHook: ((familyId: string) => Promise<void>) | null = null;
-export const setPreCreateHook = (hook: ((familyId: string) => Promise<void>) | null): void => {
-  preCreateHook = hook;
-};
-
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
@@ -63,10 +57,6 @@ export const issueTokenPair = async (
   const rawRefreshToken = generateOpaqueToken();
   const tokenHash = hashToken(rawRefreshToken);
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
-
-  if (preCreateHook && familyId) {
-    await preCreateHook(resolvedFamilyId);
-  }
 
   try {
     await RefreshToken.create({

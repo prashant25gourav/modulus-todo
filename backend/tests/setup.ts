@@ -1,0 +1,12 @@
+process.env.NODE_ENV = 'test';
+process.env.PORT = '5000';
+process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/modulus_test';
+process.env.CORS_ORIGIN = '*';
+process.env.JWT_ACCESS_SECRET = 'test_jwt_access_secret_for_vitest_min_32_chars_ok!';
+process.env.ACCESS_TOKEN_TTL = '15m';
+process.env.AUTH_RATE_LIMIT_WINDOW_MS = '900000';
+process.env.AUTH_RATE_LIMIT_MAX = '1000';
+process.env.REFRESH_TOKEN_TTL_DAYS = '30';
+process.env.REFRESH_GRACE_SECONDS = '10';
+process.env.REFRESH_RATE_LIMIT_MAX = '1000';
+process.env.REFRESH_RATE_LIMIT_WINDOW_MS = '900000';

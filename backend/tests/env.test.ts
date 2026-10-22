@@ -87,4 +87,11 @@ describe('Environment Validation', () => {
       expect(message).not.toContain('invalid-port-string');
     }
   });
+
+  it('should ensure the test process contains no real Atlas host in MONGODB_URI', () => {
+    const uri = process.env.MONGODB_URI || '';
+    expect(uri).not.toContain('.mongodb.net');
+    expect(uri).not.toContain('mongodb+srv://');
+    expect(uri).toBe('mongodb://127.0.0.1:27017/modulus_test');
+  });
 });
