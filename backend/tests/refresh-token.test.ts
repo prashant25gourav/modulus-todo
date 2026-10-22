@@ -9,7 +9,7 @@ import { connectDB, disconnectDB } from '../src/config/db';
 import { User } from '../src/models/user.model';
 import { RefreshToken } from '../src/models/refresh-token.model';
 import { hashToken } from '../src/utils/token';
-import { setTokenLogger, resetTokenLogger } from '../src/services/token.service';
+import { setTokenLogger, resetTokenLogger, setPreCreateHook } from '../src/services/token.service';
 import { createRefreshLimiter, createAuthLimiter } from '../src/routes/auth.routes';
 
 describe('Refresh Tokens, Rotation and Session Revocation Integration Suite', () => {
@@ -31,6 +31,7 @@ describe('Refresh Tokens, Rotation and Session Revocation Integration Suite', ()
     await User.deleteMany({});
     await RefreshToken.deleteMany({});
     resetTokenLogger();
+    setPreCreateHook(null);
   });
 
   describe('Token Rotation & Persistence Security', () => {
@@ -214,6 +215,46 @@ describe('Refresh Tokens, Rotation and Session Revocation Integration Suite', ()
           .post('/api/auth/refresh')
           .send({ refreshToken: token });
         expect(nextAttempt.status).toBe(401);
+      }
+    });
+
+    it('should detect when family was revoked between CAS and creation, marking the new token revoked and returning 401', async () => {
+      const reg = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: 'racecondition@example.com',
+          password: 'Password123!',
+        });
+
+      const token0 = reg.body.refreshToken;
+
+      // Set hook to simulate a concurrent family revocation occurring between CAS and token creation
+      setPreCreateHook(async (familyId: string) => {
+        await RefreshToken.updateMany(
+          { familyId },
+          { $set: { revokedAt: new Date() } }
+        );
+      });
+
+      // Call refresh: CAS succeeds, but preCreateHook revokes family before create finishes
+      const refreshRes = await request(app)
+        .post('/api/auth/refresh')
+        .send({ refreshToken: token0 });
+
+      expect(refreshRes.status).toBe(401);
+      expect(refreshRes.body).toEqual({
+        status: 'error',
+        message: 'Invalid or revoked refresh token',
+      });
+
+      // Reset hook
+      setPreCreateHook(null);
+
+      // Verify that all tokens in the database for this user are revoked and unusable
+      const allTokens = await RefreshToken.find({});
+      expect(allTokens.length).toBeGreaterThan(1);
+      for (const t of allTokens) {
+        expect(t.revokedAt).not.toBeNull();
       }
     });
 

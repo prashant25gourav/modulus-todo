@@ -4,6 +4,7 @@ import pino from 'pino';
 import { RefreshToken } from '../models/refresh-token.model';
 import { User } from '../models/user.model';
 import { env } from '../config/env';
+import { redactUri } from '../config/db';
 import { signAccessToken } from '../utils/jwt';
 import { generateOpaqueToken, hashToken } from '../utils/token';
 
@@ -32,6 +33,19 @@ export class TokenPersistenceError extends Error {
   }
 }
 
+export class FamilyRevokedError extends Error {
+  constructor() {
+    super('Token family was revoked');
+    this.name = 'FamilyRevokedError';
+  }
+}
+
+// Optional hook to simulate pause/concurrency races between compare-and-set and create in tests
+export let preCreateHook: ((familyId: string) => Promise<void>) | null = null;
+export const setPreCreateHook = (hook: ((familyId: string) => Promise<void>) | null): void => {
+  preCreateHook = hook;
+};
+
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
@@ -50,6 +64,10 @@ export const issueTokenPair = async (
   const tokenHash = hashToken(rawRefreshToken);
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+  if (preCreateHook && familyId) {
+    await preCreateHook(resolvedFamilyId);
+  }
+
   try {
     await RefreshToken.create({
       tokenHash,
@@ -58,9 +76,26 @@ export const issueTokenPair = async (
       expiresAt,
     });
   } catch (error) {
-    const errMessage = error instanceof Error ? error.message : String(error);
+    const rawError = error instanceof Error ? error.message : String(error);
+    const errMessage = redactUri(rawError);
     activeLogger.error({ errMessage }, 'Failed to persist refresh token');
     throw new TokenPersistenceError('Failed to persist refresh token');
+  }
+
+  // If this is a rotation path (familyId present), verify the family was not revoked during creation
+  if (familyId) {
+    const familyRevoked = await RefreshToken.exists({
+      familyId: resolvedFamilyId,
+      revokedAt: { $ne: null },
+    });
+
+    if (familyRevoked) {
+      await RefreshToken.updateOne(
+        { tokenHash },
+        { $set: { revokedAt: new Date() } }
+      );
+      throw new FamilyRevokedError();
+    }
   }
 
   const accessToken = signAccessToken(userId.toString());
@@ -102,7 +137,10 @@ export const rotateRefreshToken = async (rawRefreshToken: string): Promise<Rotat
     try {
       const tokens = await issueTokenPair(freshToken.userId, freshToken.familyId);
       return { success: true, ...tokens };
-    } catch {
+    } catch (error) {
+      if (error instanceof FamilyRevokedError) {
+        return { success: false, status: 401, message: 'Invalid or revoked refresh token' };
+      }
       return { success: false, status: 500, message: 'Internal Server Error' };
     }
   }
@@ -150,7 +188,10 @@ export const rotateRefreshToken = async (rawRefreshToken: string): Promise<Rotat
         try {
           const tokens = await issueTokenPair(graceToken.userId, graceToken.familyId);
           return { success: true, ...tokens };
-        } catch {
+        } catch (error) {
+          if (error instanceof FamilyRevokedError) {
+            return { success: false, status: 401, message: 'Invalid or revoked refresh token' };
+          }
           return { success: false, status: 500, message: 'Internal Server Error' };
         }
       }
@@ -179,22 +220,28 @@ export const rotateRefreshToken = async (rawRefreshToken: string): Promise<Rotat
 };
 
 /**
- * Revoke a single refresh token or family. Idempotent.
+ * Revoke all tokens in the token's family (revokedAt: null filter).
+ * Unknown token is a silent, idempotent no-op.
  */
 export const revokeToken = async (rawRefreshToken: string): Promise<void> => {
   const tokenHash = hashToken(rawRefreshToken);
+  const token = await RefreshToken.findOne({ tokenHash });
+  if (!token) {
+    return;
+  }
+
   await RefreshToken.updateMany(
-    { tokenHash },
+    { familyId: token.familyId, revokedAt: null },
     { $set: { revokedAt: new Date() } }
   );
 };
 
 /**
- * Revoke all active refresh tokens belonging to a user.
+ * Revoke all active refresh tokens belonging to a user (revokedAt: null filter).
  */
 export const revokeAllUserTokens = async (userId: Types.ObjectId | string): Promise<void> => {
   await RefreshToken.updateMany(
-    { userId: new Types.ObjectId(userId.toString()) },
+    { userId: new Types.ObjectId(userId.toString()), revokedAt: null },
     { $set: { revokedAt: new Date() } }
   );
 };
