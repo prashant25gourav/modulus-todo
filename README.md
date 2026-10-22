@@ -34,8 +34,9 @@ flowchart LR
 ### Prerequisites
 
 - Node.js >= 22.11.0 and npm
-- Android SDK (Gradle downloads the required platform; tested on a Pixel 6 API 34 emulator)
-- MongoDB instance (MongoDB Atlas URI, or local Docker container: `docker run -d -p 27017:27017 --name mongo mongo:latest`)
+- JDK 17
+- Android Studio or the command-line tools with an emulator (Gradle downloads the required platform; tested on a Pixel 6 API 34 emulator)
+- MongoDB instance (MongoDB Atlas URI, or local Docker container: `docker run -d -p 27017:27017 --name mongo mongo:latest`). Note that backend tests use an in-memory database and need no running database.
 
 ### Backend Setup
 
@@ -44,7 +45,7 @@ cd backend
 npm install
 cp .env.example .env   # configure MONGODB_URI and JWT_ACCESS_SECRET
 npm run dev            # starts dev server on http://localhost:5000
-npm test               # executes backend Vitest test suite
+npm test               # executes backend Vitest test suite (requires no database)
 npm run lint           # verifies ESLint compliance
 ```
 
@@ -68,7 +69,7 @@ npm test               # executes mobile Jest test suite
 npm run lint           # verifies ESLint compliance
 ```
 
-The debug build talks to the local backend at http://10.0.2.2:5000; the release APK talks to https://modulus-todo.onrender.com. When testing on a physical Android device instead of an emulator, replace the loopback URL in `mobile/src/config.ts` with your development machine's LAN IP address.
+The backend must be running for the debug app (the debug build talks to the local backend at http://10.0.2.2:5000; the release APK talks to https://modulus-todo.onrender.com). When testing on a physical Android device instead of an emulator, replace the loopback URL in `mobile/src/config.ts` with your development machine's LAN IP address.
 
 ## Environment Variables
 
@@ -97,22 +98,23 @@ Complete endpoint specifications, request/response envelopes, and error contract
 
 - Argon2id is used for password hashing because it is memory-hard and provides resistance against GPU and ASIC cracking attacks.
 - 15-minute access tokens are explicitly pinned to the HS256 algorithm to prevent algorithm switching ('none') attacks.
-- 30-day refresh tokens are stored as SHA-256 hashes in MongoDB with a 10-second reuse grace window to handle mobile network retries.
+- Refresh tokens are opaque random values stored only as SHA-256 hashes, and they rotate on every use. If a token that was already used is presented again, the whole token family is revoked, except for one replacement token issued within a 10-second grace window to cover lost responses on mobile networks.
 - Per-user data isolation is enforced at the database query level (`{ _id: id, userId }`), returning 404 on not-found to prevent enumeration.
 - Urgency score formula computed dynamically on query: completed tasks receive -1; overdue tasks receive 10000 * weight + min(overdueHours, 336) * 10; upcoming tasks receive (1000 / (hoursLeft + 1)) * weight (halved if scheduled start is in the future); priority weights are high 3, medium 2, low 1.
 - The mobile API client implements a single-flight refresh queue to prevent stampeding the refresh endpoint on concurrent 401 responses.
-- Auth credentials on Android are encrypted using the Android Keystore (via react-native-keychain).
 - Task completion and deletion update optimistically in Zustand and roll back on failure; create and edit operations wait for the server before updating state.
 
 ## Known Limitations
 
-- Access tokens are stateless with a 15-minute lifetime until expiration.
+- Access tokens cannot be revoked. After logout, a stolen access token remains valid for up to 15 minutes (refresh tokens are revoked immediately).
+- No email verification or password reset functionality is implemented.
+- Urgency and priority sorting is computed in the database per request (fine for per-user lists, not designed for very large ones) and urgency order changes as time passes.
 - Free Render hosting tier cold-starts can take up to about a minute on initial requests; the mobile client timeout is set to 60s.
-- The mobile release APK is signed with the Android debug keystore for submission evaluation.
-- Binary builds are compiled for `x86_64` and `arm64-v8a` architectures (`reactNativeArchitectures=x86_64,arm64-v8a` in `mobile/android/gradle.properties`).
+- The mobile release APK is signed with the Android debug keystore.
+- The APK includes x86_64 and arm64-v8a builds only, so it will not run on 32-bit ARM devices.
 - iOS is not built or supported for this submission.
 
 ## Download & Deployment
 
 - Release APK: [app-release.apk](https://github.com/prashant25gourav/modulus-todo/releases/download/v1.0.0/app-release.apk)
-- Live Production API: `https://modulus-todo.onrender.com`
+- Live API: [https://modulus-todo.onrender.com](https://modulus-todo.onrender.com) (health check: /api/health). The first request after idle may take up to a minute.
