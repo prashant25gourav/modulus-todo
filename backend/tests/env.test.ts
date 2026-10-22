@@ -17,6 +17,20 @@ describe('Environment Validation', () => {
     expect(validConfig.MONGODB_URI).toBe('mongodb://localhost:27017/test_db');
     expect(validConfig.JWT_ACCESS_SECRET).toBe('super_secret_jwt_access_token_key_at_least_32_chars_long!');
     expect(validConfig.ACCESS_TOKEN_TTL).toBe('30m');
+    expect(validConfig.AUTH_RATE_LIMIT_WINDOW_MS).toBe(900000);
+    expect(validConfig.AUTH_RATE_LIMIT_MAX).toBe(20);
+  });
+
+  it('should accept custom rate limit environment variables', () => {
+    const config = validateEnv({
+      MONGODB_URI: 'mongodb://localhost:27017/test_db',
+      JWT_ACCESS_SECRET: 'super_secret_jwt_access_token_key_at_least_32_chars_long!',
+      AUTH_RATE_LIMIT_WINDOW_MS: '60000',
+      AUTH_RATE_LIMIT_MAX: '5',
+    });
+
+    expect(config.AUTH_RATE_LIMIT_WINDOW_MS).toBe(60000);
+    expect(config.AUTH_RATE_LIMIT_MAX).toBe(5);
   });
 
   it('should fail fast with clear error message when MONGODB_URI is missing', () => {

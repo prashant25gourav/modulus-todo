@@ -16,6 +16,8 @@ export const envSchema = z.object({
     .string()
     .regex(/^\d+[smhd]$/, 'ACCESS_TOKEN_TTL must be a duration string matching format like 15m, 1h, 7d')
     .default('15m'),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(20),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -46,5 +48,7 @@ export const env: EnvConfig = process.env.NODE_ENV === 'test'
       CORS_ORIGIN: '*',
       JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'test_jwt_access_secret_for_vitest_min_32_chars_ok!',
       ACCESS_TOKEN_TTL: '15m',
+      AUTH_RATE_LIMIT_WINDOW_MS: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+      AUTH_RATE_LIMIT_MAX: Number(process.env.AUTH_RATE_LIMIT_MAX) || 1000,
     }
   : validateEnv(process.env);
