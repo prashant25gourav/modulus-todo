@@ -1,3 +1,4 @@
+import { AppError } from '../utils/errors';
 import { Types, PipelineStage } from 'mongoose';
 import { Task } from '../models/task.model';
 import { buildUrgencyAggregationStages } from '../utils/urgency';
@@ -79,9 +80,7 @@ export const updateTask = async (
       : existing.deadline;
 
     if (targetDeadline.getTime() < targetScheduledAt.getTime()) {
-      const err = new Error('deadline must be greater than or equal to scheduledAt');
-      (err as { statusCode?: number }).statusCode = 400;
-      throw err;
+      throw new AppError('deadline must be greater than or equal to scheduledAt', 400);
     }
   }
 

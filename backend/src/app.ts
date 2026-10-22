@@ -7,6 +7,7 @@ import pinoHttp from 'pino-http';
 import { getDbState } from './config/db';
 import authRoutes from './routes/auth.routes';
 import taskRoutes from './routes/task.routes';
+import { AppError } from './utils/errors';
 
 const app = express();
 
@@ -93,7 +94,14 @@ app.use((_req: Request, res: Response) => {
 
 // Global error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  const isProduction = process.env.NODE_ENV === 'production';
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({
+      status: 'error',
+      message: err.message,
+    });
+    return;
+  }
+
   const errObj = err as { type?: string; status?: number; statusCode?: number };
   const statusCode = errObj.status || errObj.statusCode || 500;
 
@@ -118,12 +126,11 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
 
-  // Consistent error response; omit stack trace in production and on client errors
-  const showStack = !isProduction && statusCode >= 500;
+  // For 500 or unknown server errors, never leak stack traces or internal details
+  const message = statusCode >= 500 ? 'Internal Server Error' : (err.message || 'Internal Server Error');
   res.status(statusCode).json({
     status: 'error',
-    message: err.message || 'Internal Server Error',
-    ...(showStack ? { stack: err.stack } : {}),
+    message,
   });
 });
 
