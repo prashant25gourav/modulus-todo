@@ -45,8 +45,11 @@ describe('Authentication & Security Integration Suite', () => {
         });
 
       expect(response.status).toBe(201);
+      expect(response.headers['cache-control']).toBe('no-store');
       expect(response.body).toHaveProperty('user');
-      expect(response.body).toHaveProperty('token');
+      expect(response.body).toHaveProperty('accessToken');
+      expect(response.body).toHaveProperty('refreshToken');
+      expect(response.body).not.toHaveProperty('token');
       expect(response.body.user).toHaveProperty('id');
       expect(response.body.user.email).toBe('newuser@example.com');
       expect(response.body.user.createdAt).toBeDefined();
@@ -54,8 +57,8 @@ describe('Authentication & Security Integration Suite', () => {
       expect(response.body.user.passwordHash).toBeUndefined();
       expect(JSON.stringify(response.body)).not.toContain('passwordHash');
 
-      // Verify token can be decoded
-      const decoded = jwt.decode(response.body.token) as { sub: string; iss: string; aud: string };
+      // Verify access token can be decoded
+      const decoded = jwt.decode(response.body.accessToken) as { sub: string; iss: string; aud: string };
       expect(decoded.sub).toBe(response.body.user.id);
       expect(decoded.iss).toBe('modulus-todo-api');
       expect(decoded.aud).toBe('modulus-todo-app');
@@ -194,8 +197,11 @@ describe('Authentication & Security Integration Suite', () => {
         });
 
       expect(response.status).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
       expect(response.body).toHaveProperty('user');
-      expect(response.body).toHaveProperty('token');
+      expect(response.body).toHaveProperty('accessToken');
+      expect(response.body).toHaveProperty('refreshToken');
+      expect(response.body).not.toHaveProperty('token');
       expect(response.body.user.email).toBe('existing@example.com');
       expect(response.body.user.passwordHash).toBeUndefined();
       expect(JSON.stringify(response.body)).not.toContain('passwordHash');
@@ -266,7 +272,7 @@ describe('Authentication & Security Integration Suite', () => {
           email: 'me-user@example.com',
           password: 'Password123!',
         });
-      validToken = reg.body.token;
+      validToken = reg.body.accessToken;
       userId = reg.body.user.id;
     });
 
@@ -474,7 +480,7 @@ describe('Authentication & Security Integration Suite', () => {
       for (let i = 0; i < 5; i++) {
         const res = await request(app)
           .get('/api/auth/me')
-          .set('Authorization', `Bearer ${reg.body.token}`);
+          .set('Authorization', `Bearer ${reg.body.accessToken}`);
         expect(res.status).toBe(200);
       }
     });

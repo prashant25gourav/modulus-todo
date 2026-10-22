@@ -2,7 +2,12 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { User } from '../models/user.model';
 import { hashPassword, verifyPassword, dummyVerifyPassword } from '../utils/password';
-import { signAccessToken } from '../utils/jwt';
+import {
+  issueTokenPair,
+  rotateRefreshToken,
+  revokeToken,
+  revokeAllUserTokens,
+} from '../services/token.service';
 
 // Validation schemas with strict string validation
 export const authCredentialsSchema = z.object({
@@ -18,9 +23,15 @@ export const authCredentialsSchema = z.object({
     .max(128, 'Password cannot exceed 128 characters'),
 });
 
+export const refreshTokenSchema = z.object({
+  refreshToken: z
+    .string('Refresh token must be a string')
+    .regex(/^[0-9a-f]{64}$/, 'Invalid refresh token format'),
+});
+
 /**
  * Register a new user account.
- * Validates input, hashes password, saves user, and issues a JWT access token.
+ * Validates input, hashes password, saves user, and issues a token pair.
  */
 export const register = async (req: Request, res: Response): Promise<void> => {
   // Validate input before any hashing or database calls
@@ -44,11 +55,13 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const user = new User({ email, passwordHash });
     await user.save();
 
-    const token = signAccessToken(user.id);
+    const { accessToken, refreshToken } = await issueTokenPair(user._id);
 
+    res.setHeader('Cache-Control', 'no-store');
     res.status(201).json({
       user: user.toJSON(),
-      token,
+      accessToken,
+      refreshToken,
     });
   } catch (error: unknown) {
     // Catch duplicate key error code 11000 from MongoDB unique index
@@ -106,11 +119,82 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const token = signAccessToken(user.id);
+  const { accessToken, refreshToken } = await issueTokenPair(user._id);
 
+  res.setHeader('Cache-Control', 'no-store');
   res.status(200).json({
     user: user.toJSON(),
-    token,
+    accessToken,
+    refreshToken,
+  });
+};
+
+/**
+ * Rotate refresh token with grace window handling and reuse detection.
+ */
+export const refresh = async (req: Request, res: Response): Promise<void> => {
+  const parseResult = refreshTokenSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Validation failed',
+      errors: parseResult.error.issues.map((issue) => ({
+        field: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+    return;
+  }
+
+  const result = await rotateRefreshToken(parseResult.data.refreshToken);
+
+  if (!result.success) {
+    res.status(result.status).json({
+      status: 'error',
+      message: result.message,
+    });
+    return;
+  }
+
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).json({
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+  });
+};
+
+/**
+ * Logout single session by revoking the refresh token. Idempotent.
+ */
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  const rawToken = req.body?.refreshToken;
+  if (typeof rawToken === 'string' && /^[0-9a-f]{64}$/.test(rawToken)) {
+    await revokeToken(rawToken);
+  }
+
+  res.status(200).json({
+    status: 'ok',
+    message: 'Logged out successfully',
+  });
+};
+
+/**
+ * Logout all sessions belonging to the authenticated user.
+ */
+export const logoutAll = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized',
+    });
+    return;
+  }
+
+  await revokeAllUserTokens(req.user._id);
+
+  res.status(200).json({
+    status: 'ok',
+    message: 'All sessions logged out successfully',
   });
 };
 
