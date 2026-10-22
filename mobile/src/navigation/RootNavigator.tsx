@@ -4,7 +4,8 @@ import { useAuthStore } from '../store/auth';
 import { SplashScreen } from '../screens/SplashScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
-import { HomeScreen } from '../screens/HomeScreen';
+import { TaskListScreen } from '../screens/TaskListScreen';
+import { TaskFormScreen } from '../screens/TaskFormScreen';
 import { AuthStackParamList, AppStackParamList } from './types';
 import { theme } from '../theme';
 
@@ -29,10 +30,11 @@ const AppNavigator = () => (
     screenOptions={{
       headerShown: false,
       contentStyle: { backgroundColor: theme.colors.background },
-      animation: 'fade',
+      animation: 'slide_from_right',
     }}
   >
-    <AppStack.Screen name="Home" component={HomeScreen} />
+    <AppStack.Screen name="TaskList" component={TaskListScreen} />
+    <AppStack.Screen name="TaskForm" component={TaskFormScreen} />
   </AppStack.Navigator>
 );
 

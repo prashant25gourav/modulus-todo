@@ -9,3 +9,10 @@ jest.mock('react-native-keychain', () => ({
   getGenericPassword: jest.fn().mockResolvedValue(false),
   resetGenericPassword: jest.fn().mockResolvedValue(true),
 }));
+
+// Mock datetimepicker
+jest.mock('@react-native-community/datetimepicker', () => {
+  const React = require('react');
+  const View = require('react-native').View;
+  return (props) => React.createElement(View, props);
+});
