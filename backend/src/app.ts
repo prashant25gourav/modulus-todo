@@ -4,18 +4,17 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
-import { getDbState } from './config/db';
+import { getDbState, redactUri } from './config/db';
 import authRoutes from './routes/auth.routes';
 import taskRoutes from './routes/task.routes';
 import { AppError } from './utils/errors';
 
 const app = express();
 
-// Security Note on Reverse Proxies:
-// 'trust proxy' is intentionally NOT configured at this stage. It will be configured
-// during production deployment according to the specific reverse proxy topology
-// (e.g., AWS ALB, Nginx, Cloudflare) to prevent client IP spoofing in rate-limiting
-// and request logging.
+// Trust reverse proxy (configured for Render's single proxy hop).
+// Setting trust proxy to 1 ensures express-rate-limit and request logging correctly
+// identify client IPs from the X-Forwarded-For header while preventing client IP spoofing.
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
@@ -50,6 +49,11 @@ export const httpLogger = pinoHttp({
   },
 });
 app.use(httpLogger);
+
+export const errorLogger = pino({
+  name: 'error',
+  level: process.env.NODE_ENV === 'test' && !process.env.TEST_LOGS ? 'silent' : 'info',
+});
 
 // Global rate limiting middleware
 const limiter = rateLimit({
@@ -124,6 +128,23 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
       message: 'Payload too large',
     });
     return;
+  }
+
+  // Log unexpected errors (anything that becomes a 500)
+  // Only error name and message passed through redactUri are logged.
+  // No stack trace and no request body in logs, and no internal detail leaked in response.
+  if (statusCode >= 500) {
+    const errName = err.name || 'Error';
+    const rawMessage = err.message || String(err);
+    const sanitizedMessage = redactUri(rawMessage);
+
+    errorLogger.error(
+      {
+        errName,
+        errMessage: sanitizedMessage,
+      },
+      'Unexpected server error'
+    );
   }
 
   // For 500 or unknown server errors, never leak stack traces or internal details
