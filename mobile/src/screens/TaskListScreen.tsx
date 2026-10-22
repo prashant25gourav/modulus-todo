@@ -9,6 +9,7 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppStackParamList } from '../navigation/types';
 import { useTasksStore, StatusFilter, SortOption } from '../store/tasks';
@@ -21,6 +22,7 @@ import { isOverdue } from '../utils/date';
 type Props = NativeStackScreenProps<AppStackParamList, 'TaskList'>;
 
 export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { user, logout } = useAuthStore();
   const {
     tasks,
@@ -114,7 +116,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       {/* Top Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + theme.spacing.sm }]}>
         <View style={styles.headerTopRow}>
           <View>
             <Text style={styles.greetingTitle}>Modulus Todo</Text>
@@ -209,7 +211,7 @@ export const TaskListScreen: React.FC<Props> = ({ navigation }) => {
       {/* Task List Content */}
       <FlatList
         data={tasks}
-        keyExtractor={(item) => item._id}
+        keyExtractor={(item) => item.id || item._id!}
         renderItem={({ item }) => (
           <TaskCard
             task={item}

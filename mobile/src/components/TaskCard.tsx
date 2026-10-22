@@ -48,7 +48,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => onDelete(task._id),
+          onPress: () => onDelete(task.id || task._id!),
         },
       ]
     );
@@ -70,7 +70,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             styles.checkbox,
             task.completed && styles.checkboxChecked,
           ]}
-          onPress={() => onToggleCompletion(task._id)}
+          onPress={() => onToggleCompletion(task.id || task._id!)}
           activeOpacity={0.7}
         >
           {task.completed ? <Text style={styles.checkmark}>✓</Text> : null}

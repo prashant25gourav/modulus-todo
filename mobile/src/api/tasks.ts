@@ -3,7 +3,8 @@ import { apiFetch } from './client';
 export type Priority = 'low' | 'medium' | 'high';
 
 export interface Task {
-  _id: string;
+  id: string;
+  _id?: string;
   userId: string;
   title: string;
   description?: string;

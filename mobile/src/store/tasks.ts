@@ -103,8 +103,12 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         limit: 20,
       });
 
+      const normalizedTasks = response.tasks.map((t: any) => ({
+        ...t,
+        id: t.id || t._id,
+      }));
       set({
-        tasks: response.tasks,
+        tasks: normalizedTasks,
         pagination: response.pagination,
         isLoading: false,
         isRefreshing: false,
@@ -145,8 +149,12 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         limit: 20,
       });
 
+      const normalizedNewTasks = response.tasks.map((t: any) => ({
+        ...t,
+        id: t.id || t._id,
+      }));
       set({
-        tasks: [...tasks, ...response.tasks],
+        tasks: [...tasks, ...normalizedNewTasks],
         pagination: response.pagination,
         isLoadingMore: false,
       });
@@ -157,7 +165,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
   toggleCompletion: async (id: string) => {
     const { tasks } = get();
-    const taskIndex = tasks.findIndex((t) => t._id === id);
+    const taskIndex = tasks.findIndex((t) => (t.id || t._id) === id);
     if (taskIndex === -1) return;
 
     const previousTask = tasks[taskIndex];
@@ -176,7 +184,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       const updated = await setTaskCompletion(id, newCompleted);
       // Synchronize with server response
       const syncedTasks = [...get().tasks];
-      const currentIndex = syncedTasks.findIndex((t) => t._id === id);
+      const currentIndex = syncedTasks.findIndex((t) => (t.id || t._id) === id);
       if (currentIndex !== -1) {
         syncedTasks[currentIndex] = updated;
         set({ tasks: syncedTasks });
@@ -184,7 +192,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     } catch {
       // Rollback on failure
       const rolledBackTasks = [...get().tasks];
-      const currentIndex = rolledBackTasks.findIndex((t) => t._id === id);
+      const currentIndex = rolledBackTasks.findIndex((t) => (t.id || t._id) === id);
       if (currentIndex !== -1) {
         rolledBackTasks[currentIndex] = previousTask;
         set({
@@ -201,7 +209,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
     // Optimistically remove from list
     set({
-      tasks: tasks.filter((t) => t._id !== id),
+      tasks: tasks.filter((t) => (t.id || t._id) !== id),
       pagination: {
         ...pagination,
         total: Math.max(0, pagination.total - 1),

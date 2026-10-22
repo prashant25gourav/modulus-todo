@@ -140,7 +140,7 @@ export const TaskFormScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsSaving(true);
     try {
       if (isEditing && existingTask) {
-        await updateTask(existingTask._id, {
+        await updateTask(existingTask.id || existingTask._id!, {
           title: title.trim(),
           description: description.trim() || null,
           scheduledAt: scheduledAt.toISOString(),

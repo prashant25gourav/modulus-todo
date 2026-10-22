@@ -3,6 +3,7 @@ import * as tasksApi from '../src/api/tasks';
 
 describe('Tasks Store Optimistic Completion & Rollback', () => {
   const initialTask: tasksApi.Task = {
+    id: 'task-test-123',
     _id: 'task-test-123',
     userId: 'user-456',
     title: 'Optimistic Test Task',
